@@ -21,18 +21,22 @@ async def connect_db() -> None:
     if _db is not None:
         return
 
-    _client = AsyncIOMotorClient(
+    client = AsyncIOMotorClient(
         settings.mongo_uri,
         serverSelectionTimeoutMS=_MONGO_TIMEOUT_MS,
         connectTimeoutMS=_MONGO_TIMEOUT_MS,
         socketTimeoutMS=_MONGO_TIMEOUT_MS,
     )
+    try:
+        await client.admin.command("ping")
+    except Exception:
+        client.close()
+        raise
+
+    _client = client
     _db = _client[settings.mongo_db_name]
-    
-    # Verify connectivity
-    await _client.admin.command("ping")
     logger.info("Connected to MongoDB: %s / %s", settings.mongo_uri, settings.mongo_db_name)
-    
+
     # Ensure indices gracefully
     await _ensure_indices_gracefully()
 

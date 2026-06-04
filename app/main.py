@@ -13,6 +13,7 @@ TODO(security): Add CSRF protection if switching to cookie-based auth.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -33,6 +34,11 @@ _PATHS_WITHOUT_DB = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
 
 async def _run_startup() -> None:
     """Best-effort startup; never crash the serverless worker on Vercel."""
+    if os.getenv("VERCEL"):
+        # Lazy DB connect per request — avoids cold-start timeouts on serverless.
+        logger.info("Vercel runtime: skipping startup DB seed (lazy connect enabled)")
+        return
+
     from app.services.prompt_files import ensure_prompt_files
     from app.services.platform_config import seed_platform_config_from_files
 

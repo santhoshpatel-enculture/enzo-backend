@@ -35,7 +35,7 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs) for interactive Sw
 
 ## Deploy on Vercel
 
-Use a **separate** Vercel project linked to the `enzo-backend` repo. Set **Root Directory** to `.` (repo root). Vercel auto-detects FastAPI via `app/main.py` and `pyproject.toml` (`tool.vercel.entrypoint`). Do **not** add a legacy `api/` serverless folder or `functions` patterns in `vercel.json`.
+Use a **separate** Vercel project linked to the `enzo-backend` repo. Set **Root Directory** to `.` (repo root). Vercel auto-detects FastAPI via `app/main.py` and `pyproject.toml` (`tool.vercel.entrypoint`). Declare runtime packages in **`[project].dependencies`** in `pyproject.toml` (Vercel’s `uv` build uses that file and does not install from `requirements.txt` when both exist). Do **not** add a legacy `api/` serverless folder or `functions` patterns in `vercel.json`.
 
 See [../DEPLOYMENT.md](../DEPLOYMENT.md) for env vars, CORS, and security checklist.
 
