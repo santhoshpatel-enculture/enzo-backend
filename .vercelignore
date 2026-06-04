@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+uploads/
+scratch/
+__pycache__/
+*.pyc
+jwt_secret.txt
+.git
