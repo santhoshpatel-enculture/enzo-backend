@@ -1,5 +1,6 @@
 """Read/write canonical prompt markdown files for admin editing."""
 
+import os
 from pathlib import Path
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -16,6 +17,10 @@ _FALLBACK_KB = ""
 
 def ensure_prompt_files() -> None:
     """Create prompts directory and default files if missing."""
+    # Vercel bundles prompts/ read-only; avoid writes to the deployment filesystem.
+    if os.getenv("VERCEL"):
+        return
+
     PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
     if not SYSTEM_PROMPT_PATH.exists():
         SYSTEM_PROMPT_PATH.write_text(_FALLBACK_SYSTEM, encoding="utf-8")

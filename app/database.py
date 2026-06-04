@@ -1,6 +1,8 @@
 """MongoDB async connection via Motor for the read-only Enzo app."""
 
 import logging
+import os
+
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from app.config import settings
 
@@ -9,11 +11,22 @@ logger = logging.getLogger("enzo.database")
 _client: AsyncIOMotorClient | None = None
 _db: AsyncIOMotorDatabase | None = None
 
+# Short timeouts on Vercel so cold starts fail fast instead of FUNCTION_INVOCATION_FAILED
+_MONGO_TIMEOUT_MS = 5_000 if os.getenv("VERCEL") else 20_000
+
 
 async def connect_db() -> None:
     """Open MongoDB connection and ensure basic indices (gracefully handling read-only limits)."""
     global _client, _db
-    _client = AsyncIOMotorClient(settings.mongo_uri)
+    if _db is not None:
+        return
+
+    _client = AsyncIOMotorClient(
+        settings.mongo_uri,
+        serverSelectionTimeoutMS=_MONGO_TIMEOUT_MS,
+        connectTimeoutMS=_MONGO_TIMEOUT_MS,
+        socketTimeoutMS=_MONGO_TIMEOUT_MS,
+    )
     _db = _client[settings.mongo_db_name]
     
     # Verify connectivity

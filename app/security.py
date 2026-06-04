@@ -9,7 +9,17 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 from jose import JWTError, jwt
 
+from fastapi import HTTPException, status
+
 from app.config import settings
+
+
+def _require_jwt_secret() -> None:
+    if not settings.jwt_configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWT_SECRET_KEY is not configured on the server.",
+        )
 
 
 def hash_password(password: str) -> str:
@@ -32,6 +42,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Create a signed JWT with an expiration claim."""
+    _require_jwt_secret()
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.jwt_expiration_minutes)

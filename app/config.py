@@ -30,13 +30,15 @@ def _resolve_jwt_secret() -> str:
         if content:
             return content
 
-    # Non-production ephemeral fallback
+    # Production without a secret: allow the app to boot (e.g. Vercel health checks)
+    # but auth routes will fail until JWT_SECRET_KEY is set in the dashboard.
     app_env = os.getenv("APP_ENV", "development").lower()
     if app_env in ("production", "prod"):
-        raise RuntimeError(
-            "JWT_SECRET_KEY is required in production. "
-            "Set via environment variable or jwt_secret.txt."
+        logger.critical(
+            "JWT_SECRET_KEY is not set. Set it in Vercel Environment Variables. "
+            "Authentication endpoints will not work until configured."
         )
+        return ""
 
     ephemeral = secrets.token_hex(32)
     logger.warning(
@@ -119,6 +121,14 @@ class Settings(BaseSettings):
     @property
     def admin_email_list(self) -> list[str]:
         return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() in ("production", "prod")
+
+    @property
+    def jwt_configured(self) -> bool:
+        return bool(self.jwt_secret_key.strip())
 
 
 settings = Settings()

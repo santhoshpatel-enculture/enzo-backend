@@ -28,24 +28,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger("enzo.main")
 
+_PATHS_WITHOUT_DB = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
+
+
+async def _run_startup() -> None:
+    """Best-effort startup; never crash the serverless worker on Vercel."""
+    from app.services.prompt_files import ensure_prompt_files
+    from app.services.platform_config import seed_platform_config_from_files
+
+    try:
+        await connect_db()
+        ensure_prompt_files()
+        await seed_platform_config_from_files()
+        from app.services.platform_config import seed_tenant_configs
+        from app.services.admin_rbac import bootstrap_admin_roles
+
+        await seed_tenant_configs()
+        await bootstrap_admin_roles(get_db())
+        logger.info("Enzo backend started (env=%s)", settings.app_env)
+    except Exception as exc:
+        logger.exception(
+            "Startup initialization failed (API will retry DB per-request): %s", exc
+        )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: connect DB + seed. Shutdown: close DB."""
-    await connect_db()
-    from app.services.prompt_files import ensure_prompt_files
-    from app.services.platform_config import seed_platform_config_from_files
-
-    ensure_prompt_files()
-    await seed_platform_config_from_files()
-    from app.services.platform_config import seed_tenant_configs
-    from app.services.admin_rbac import bootstrap_admin_roles
-
-    await seed_tenant_configs()
-    await bootstrap_admin_roles(get_db())
-    logger.info("Enzo backend started (env=%s)", settings.app_env)
+    await _run_startup()
     yield
-    await close_db()
+    try:
+        await close_db()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -71,11 +86,27 @@ app.add_middleware(
 )
 
 
-# Ensure MongoDB is connected (serverless cold starts may skip lifespan timing)
 @app.middleware("http")
 async def ensure_database(request: Request, call_next):
+    """Lazy DB connect; skip for health/docs. Return 503 instead of crashing."""
+    if request.url.path in _PATHS_WITHOUT_DB:
+        return await call_next(request)
+
     if not is_db_connected():
-        await connect_db()
+        try:
+            await connect_db()
+        except Exception as exc:
+            logger.exception("Database unavailable for %s", request.url.path)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "Database unavailable. Verify MONGO_URI in Vercel env vars "
+                        "and MongoDB Atlas network access (allow 0.0.0.0/0)."
+                    ),
+                    "error": type(exc).__name__,
+                },
+            )
     return await call_next(request)
 
 
@@ -131,4 +162,54 @@ app.include_router(platform.router, prefix="/api")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "enzo-backend"}
+    """Liveness check — works even when DB/JWT are misconfigured (returns 503 + hints)."""
+    payload: dict = {
+        "service": "enzo-backend",
+        "env": settings.app_env,
+        "jwt_configured": settings.jwt_configured,
+        "db": "disconnected",
+    }
+
+    if settings.is_production and not settings.jwt_configured:
+        return JSONResponse(
+            status_code=503,
+            content={
+                **payload,
+                "status": "degraded",
+                "error": "JWT_SECRET_KEY is not set in environment variables",
+            },
+        )
+
+    if not is_db_connected():
+        try:
+            await connect_db()
+        except Exception as exc:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    **payload,
+                    "status": "degraded",
+                    "db": "error",
+                    "db_error": str(exc),
+                    "hint": (
+                        "Set MONGO_URI to your Atlas connection string and allow "
+                        "Vercel IPs in Atlas Network Access."
+                    ),
+                },
+            )
+
+    try:
+        await get_db().client.admin.command("ping")
+        payload["db"] = "connected"
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                **payload,
+                "status": "degraded",
+                "db": "error",
+                "db_error": str(exc),
+            },
+        )
+
+    return {"status": "ok", **payload}
